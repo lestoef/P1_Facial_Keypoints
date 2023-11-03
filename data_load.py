@@ -63,12 +63,31 @@ class Normalize(object):
         
         # scale color range from [0, 255] to [0, 1]
         image_copy=  image_copy/255.0
-            
         
         # scale keypoints to be centered around 0 with a range of [-1, 1]
         # mean = 100, sqrt = 50, so, pts should be (pts - 100)/50
         key_pts_copy = (key_pts_copy - 100)/50.0
 
+        return {'image': image_copy, 'keypoints': key_pts_copy}
+    
+class NormalizeRGB(object):
+    """Convert a color image to GBR and normalize the color range to [0,1]."""        
+
+    def __call__(self, sample):
+        image, key_pts = sample['image'], sample['keypoints']
+        
+        image_copy = np.copy(image)
+        key_pts_copy = np.copy(key_pts)
+
+        # convert image to grayscale
+        image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # scale color range from [0, 255] to [0, 1]
+        image_copy=  image_copy/255.0
+        
+        # scale keypoints to be centered around 0 with a range of [-1, 1]
+        # mean = 100, sqrt = 50, so, pts should be (pts - 100)/50
+        key_pts_copy = (key_pts_copy - 100)/50.0
 
         return {'image': image_copy, 'keypoints': key_pts_copy}
 
@@ -159,3 +178,57 @@ class ToTensor(object):
         
         return {'image': torch.from_numpy(image),
                 'keypoints': torch.from_numpy(key_pts)}
+    
+class ToTensorRGB(object):
+    """Convert ndarrays in sample to Tensors."""
+
+    def __call__(self, sample):
+        image, key_pts = sample['image'], sample['keypoints']
+        
+        # if image has no color channel, add one
+        if(len(image.shape) == 2):
+            # add that third color dim
+            image = image.reshape(image.shape[0], image.shape[1], 3)
+            
+        # swap color axis because
+        # numpy image: H x W x C
+        # torch image: C X H X W
+        image = image.transpose((2, 0, 1))
+        
+        return {'image': torch.from_numpy(image),
+                'keypoints': torch.from_numpy(key_pts)}
+    
+class FaceCrop(object):
+    ''' inspired by https://towardsdatascience.com/face-landmarks-detection-with-pytorch-4b4852f5e9c4'''
+    
+    def __call__(self, sample):
+        image, key_pts = sample['image'], sample['keypoints']
+
+    def __call__(self, sample):
+        image, key_pts = sample['image'], sample['keypoints']
+        
+        # get outer dimensions of face based on keypoints
+        left = key_pts.transpose()[0].min()
+        right = key_pts.transpose()[0].max()
+        bottom = key_pts.transpose()[1].min()
+        top = key_pts.transpose()[1].max()
+        kp_width = right-left
+        kp_height = top-bottom
+        # assume the face to be 10% bigger than the keypoint outline in each direction
+        width_padding = kp_width*0.1
+        height_padding = kp_height*0.1
+
+        # create crop coordinates
+        h, w = image.shape[:2]
+        new_left = max(0, int(left-width_padding))
+        new_right = min(int(right+width_padding), w)
+        new_bottom = max(0, int(bottom-height_padding))
+        new_top = min(int(top+height_padding), h)
+
+        # crop image
+        image = image[new_bottom: new_top,
+                      new_left: new_right]
+        # adapt keypoint coordinates
+        key_pts = key_pts - [new_left, new_bottom]
+
+        return {'image': image, 'keypoints': key_pts}
