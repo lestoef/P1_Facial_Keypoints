@@ -2,6 +2,7 @@ import glob
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 import numpy as np
 import matplotlib.image as mpimg
 import pandas as pd
@@ -74,7 +75,12 @@ class NormalizeRGB(object):
     """Convert a color image to GBR and normalize the color range to [0,1]."""        
 
     def __call__(self, sample):
+        
         image, key_pts = sample['image'], sample['keypoints']
+        
+        # mean and standard deviation used for color channel normalization
+        norm_means = [0.485, 0.456, 0.406]
+        norm_std = [0.229, 0.224, 0.225]      
         
         image_copy = np.copy(image)
         key_pts_copy = np.copy(key_pts)
@@ -82,8 +88,8 @@ class NormalizeRGB(object):
         # convert image to grayscale
         image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         
-        # scale color range from [0, 255] to [0, 1]
-        image_copy=  image_copy/255.0
+        # normalize color channels
+        image_copy = ((image_copy/255.0 - norm_means) / norm_std).clip(0, 1)
         
         # scale keypoints to be centered around 0 with a range of [-1, 1]
         # mean = 100, sqrt = 50, so, pts should be (pts - 100)/50
@@ -185,15 +191,32 @@ class ToTensorRGB(object):
     def __call__(self, sample):
         image, key_pts = sample['image'], sample['keypoints']
         
+        # Ensure the image data type is float32
+        image = image.astype(np.float32)
+        
         # if image has no color channel, add one
-        if(len(image.shape) == 2):
-            # add that third color dim
+        if len(image.shape) == 2:
+            # Add the third color dimension
             image = image.reshape(image.shape[0], image.shape[1], 3)
             
-        # swap color axis because
+        # Convert image from RGB to BGR
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # Mean and standard deviation used for color channel normalization
+        means = [image[:,:,0].mean(), image[:,:,1].mean(), image[:,:,2].mean()]
+        stds = [image[:,:,0].std(), image[:,:,1].std(), image[:,:,2].std()]
+        
+        # Normalize the image
+        image = ((image - means) / stds) / 255.
+        
+        # Swap color axis because
         # numpy image: H x W x C
-        # torch image: C X H X W
+        # torch image: C x H x W
         image = image.transpose((2, 0, 1))
+        
+        # Scale keypoints to be centered around 0 with a range of [-1, 1]
+        # mean = 100, sqrt = 50, so, pts should be (pts - 100)/50
+        key_pts = (key_pts - 100) / 50.0
         
         return {'image': torch.from_numpy(image),
                 'keypoints': torch.from_numpy(key_pts)}
